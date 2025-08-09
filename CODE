@@ -1,0 +1,194 @@
+!pip install pandas matplotlib numpy scikit-learn pillow openpyxl --quiet
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from PIL import Image
+from sklearn.linear_model import LogisticRegression
+from google.colab import files
+
+# Pre-train dummy AI models (image & signal)
+def create_dummy_image_histograms():
+    normal_hist = np.random.normal(loc=0.002, scale=0.001, size=256)
+    normal_hist = np.clip(normal_hist, 0, None)
+    normal_hist /= normal_hist.sum()
+    abnormal_hist = np.random.normal(loc=0.004, scale=0.002, size=256)
+    abnormal_hist = np.clip(abnormal_hist, 0, None)
+    abnormal_hist /= abnormal_hist.sum()
+    X = np.vstack([normal_hist, abnormal_hist])
+    y = np.array([0, 1])
+    return X, y
+
+def create_dummy_signal_features():
+    normal_signal = np.random.normal(loc=0, scale=1, size=500)
+    abnormal_signal = np.random.normal(loc=2, scale=2, size=500)
+    X = np.vstack([np.array([normal_signal.mean(), normal_signal.std()]),
+                   np.array([abnormal_signal.mean(), abnormal_signal.std()])])
+    y = np.array([0,1])
+    return X, y
+
+X_img, y_img = create_dummy_image_histograms()
+clf_img = LogisticRegression()
+clf_img.fit(X_img, y_img)
+
+X_sig, y_sig = create_dummy_signal_features()
+clf_sig = LogisticRegression()
+clf_sig.fit(X_sig, y_sig)
+
+# Global variables to store data
+uploaded_file = None
+file_type = None
+image_data = None
+signal_data = None
+hist_features = None
+
+def extract_histogram_features(img_arr):
+    hist, _ = np.histogram(img_arr.flatten(), bins=256, range=(0,255))
+    hist = hist.astype(float)
+    hist /= hist.sum()
+    return hist
+
+def load_file():
+    global uploaded_file, file_type, image_data, signal_data, hist_features
+    print("Upload a file (Image JPG/PNG/JPEG or Signal CSV/XLS/XLSX):")
+    uploaded = files.upload()
+    filename = next(iter(uploaded))
+    ext = filename.split('.')[-1].lower()
+    uploaded_file = filename
+
+    if ext in ['jpg', 'jpeg', 'png']:
+        file_type = 'image'
+        img = Image.open(filename).convert('L')
+        image_data = np.array(img)
+        hist_features = extract_histogram_features(image_data)
+        print(f"Image file '{filename}' loaded successfully.")
+    elif ext in ['csv', 'xls', 'xlsx']:
+        file_type = 'signal'
+        if ext == 'csv':
+            df = pd.read_csv(filename)
+        else:
+            df = pd.read_excel(filename)
+        numeric_cols = df.select_dtypes(include='number').columns
+        if len(numeric_cols) == 0:
+            print("No numeric columns found in signal file.")
+            file_type = None
+            return
+        signal_data = df[numeric_cols[0]].values
+        print(f"Signal file '{filename}' loaded successfully. Using column: '{numeric_cols[0]}'.")
+    else:
+        print("Unsupported file type.")
+        file_type = None
+
+def analyze_image():
+    global image_data, hist_features
+    if image_data is None:
+        print("No image loaded.")
+        return
+
+    threshold = image_data.mean() + image_data.std()
+    high_mask = image_data > threshold
+    num_high = np.sum(high_mask)
+    percent_high = 100 * num_high / image_data.size
+    mean_high = image_data[high_mask].mean() if num_high > 0 else 0
+
+    print("--- Image Analysis ---")
+    print(f"High intensity pixels: {num_high} ({percent_high:.2f}%)")
+    print(f"Mean high intensity: {mean_high:.2f}")
+
+    plt.figure(figsize=(12,5))
+    plt.subplot(1,2,1)
+    plt.imshow(image_data, cmap='gray')
+    plt.title("Original Image")
+    plt.axis('off')
+
+    overlay = np.zeros((*image_data.shape,3), dtype=np.uint8)
+    overlay[...,0] = high_mask * 255  # red overlay
+
+    plt.subplot(1,2,2)
+    plt.imshow(image_data, cmap='gray')
+    plt.imshow(overlay, alpha=0.5)
+    plt.title("Affected Areas Highlighted")
+    plt.axis('off')
+    plt.show()
+
+    plt.figure(figsize=(10,4))
+    plt.hist(image_data.ravel(), bins=50, color='gray')
+    plt.axvline(threshold, color='red', linestyle='dashed', label='Threshold')
+    plt.title("Intensity Histogram")
+    plt.xlabel("Pixel Intensity")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
+
+    prob = clf_img.predict_proba(hist_features.reshape(1,-1))[0,1]
+    print(f"AI model abnormality probability: {prob:.3f}")
+
+def analyze_signal():
+    global signal_data
+    if signal_data is None:
+        print("No signal loaded.")
+        return
+
+    mean_val = signal_data.mean()
+    std_val = signal_data.std()
+
+    print("--- Signal Analysis ---")
+    print(f"Mean amplitude: {mean_val:.3f}")
+    print(f"Standard deviation: {std_val:.3f}")
+    print(f"Signal length: {len(signal_data)} samples")
+
+    plt.figure(figsize=(12,4))
+    plt.plot(signal_data, color='blue')
+    plt.title("Signal Waveform")
+    plt.xlabel("Sample number")
+    plt.ylabel("Amplitude")
+    plt.grid(True)
+    plt.show()
+
+    features = np.array([mean_val, std_val]).reshape(1,-1)
+    prob = clf_sig.predict_proba(features)[0,1]
+    print(f"AI model abnormality probability: {prob:.3f}")
+
+def chatbot():
+    print("Welcome to your Medical Imaging & Signal Analyzer Chatbot!")
+    print("Type 'help' to see commands.")
+
+    while True:
+        inp = input("You: ").strip().lower()
+
+        if inp in ['exit', 'quit']:
+            print("Chatbot: Goodbye!")
+            break
+        elif inp == 'help':
+            print("""
+Commands:
+- upload       : Upload a new file (image or signal)
+- analyze      : Analyze the currently loaded file
+- show image   : Show image details (only if image loaded)
+- show signal  : Show signal details (only if signal loaded)
+- help         : Show this help
+- exit / quit  : Exit chatbot
+            """)
+        elif inp == 'upload':
+            load_file()
+        elif inp == 'analyze':
+            if file_type == 'image':
+                analyze_image()
+            elif file_type == 'signal':
+                analyze_signal()
+            else:
+                print("No file loaded or unsupported type.")
+        elif inp == 'show image':
+            if file_type == 'image':
+                print(f"Image shape: {image_data.shape}")
+            else:
+                print("No image loaded.")
+        elif inp == 'show signal':
+            if file_type == 'signal':
+                print(f"Signal length: {len(signal_data)} samples")
+            else:
+                print("No signal loaded.")
+        else:
+            print("Unknown command. Type 'help' for commands.")
+
+chatbot()
