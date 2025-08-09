@@ -1,4 +1,5 @@
 Medical Imaging & Signal Analysis Chatbot
+
 This project is an AI-powered chatbot that helps analyze medical images (like MRI, CT) and electrophysiological signals (like EEG, ECG).
 
 Features
